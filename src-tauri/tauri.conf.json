@@ -1,0 +1,62 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "PixelView",
+  "version": "0.2.1",
+  "identifier": "com.pixelview.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "PixelView",
+        "label": "main",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 760,
+        "minHeight": 520,
+        "decorations": false,
+        "shadow": true,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "targets": ["nsis"],
+    "category": "Photography",
+    "shortDescription": "Fast, sharp image viewing for pixel art",
+    "fileAssociations": [
+      { "ext": ["png"], "name": "PNG image", "description": "PNG image", "mimeType": "image/png" },
+      { "ext": ["jpg", "jpeg"], "name": "JPEG image", "description": "JPEG image", "mimeType": "image/jpeg" },
+      { "ext": ["webp"], "name": "WebP image", "description": "WebP image", "mimeType": "image/webp" },
+      { "ext": ["bmp"], "name": "Bitmap image", "description": "Bitmap image", "mimeType": "image/bmp" },
+      { "ext": ["gif"], "name": "GIF image", "description": "GIF image", "mimeType": "image/gif" }
+    ],
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
+      "nsis": { "installMode": "currentUser", "languages": ["SimpChinese", "English"] }
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE4QTY1NTEyNkYyQThGNjkKUldScGp5cHZFbFdtR1B2YTF2SE9jVHZ1emNLdVNEMXlpcFdQN0NQZHg0L0RDYkVZK0dYdG5MeFUK",
+      "endpoints": ["https://github.com/NetTimber/PixelView/releases/latest/download/latest.json"],
+      "windows": { "installMode": "passive" }
+    }
+  }
+}

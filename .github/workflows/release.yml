@@ -1,0 +1,99 @@
+name: Release PixelView
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Rust
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify release version
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ("v$version" -ne $env:GITHUB_REF_NAME) {
+            throw "Tag $env:GITHUB_REF_NAME does not match package version v$version"
+          }
+
+      - name: Run tests
+        shell: pwsh
+        run: |
+          npm run build
+          cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+      - name: Build signed installer
+        run: npm run tauri build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+
+      - name: Create update manifest
+        id: package
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $bundle = Join-Path $PWD "src-tauri\target\release\bundle\nsis"
+          $installer = Get-ChildItem $bundle -Filter "*-setup.exe" -File |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+          if (-not $installer) { throw "NSIS installer was not generated" }
+
+          $signaturePath = "$($installer.FullName).sig"
+          if (-not (Test-Path $signaturePath)) { throw "Updater signature was not generated" }
+
+          $downloadUrl = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:GITHUB_REF_NAME/$($installer.Name)"
+          $manifest = [ordered]@{
+            version = $version
+            notes = "PixelView $version"
+            pub_date = (Get-Date).ToUniversalTime().ToString("o")
+            platforms = [ordered]@{
+              "windows-x86_64" = [ordered]@{
+                signature = (Get-Content $signaturePath -Raw).Trim()
+                url = $downloadUrl
+              }
+            }
+          }
+          $manifestPath = Join-Path $bundle "latest.json"
+          $manifest | ConvertTo-Json -Depth 5 | Set-Content $manifestPath -Encoding utf8
+
+          "installer=$($installer.FullName)" >> $env:GITHUB_OUTPUT
+          "signature=$signaturePath" >> $env:GITHUB_OUTPUT
+          "manifest=$manifestPath" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = @(
+            "${{ steps.package.outputs.installer }}",
+            "${{ steps.package.outputs.signature }}",
+            "${{ steps.package.outputs.manifest }}"
+          )
+          gh release create $env:GITHUB_REF_NAME @assets `
+            --title "PixelView v${{ steps.package.outputs.version }}" `
+            --generate-notes
