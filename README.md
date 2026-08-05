@@ -73,6 +73,14 @@ cargo test --manifest-path src-tauri/Cargo.toml --locked
 npm run tauri build
 ```
 
+也可以在项目根目录运行一键构建脚本。脚本会先检查前端和 Rust 代码，再生成带更新签名的 NSIS 安装包：
+
+```powershell
+.\build-release.ps1 -SigningKeyPath "你的签名私钥文件"
+```
+
+也可以预先设置 `TAURI_SIGNING_PRIVATE_KEY` 环境变量，此时无需传入密钥文件路径。签名私钥和密码不得提交到仓库。
+
 ## 发布
 
 项目通过 GitHub Actions 发布。维护者需要同步更新以下三个文件中的版本号：
