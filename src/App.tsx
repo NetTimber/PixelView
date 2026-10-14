@@ -22,6 +22,7 @@ import {
   Download,
   Expand,
   Eye,
+  Film,
   FolderOpen,
   Image as ImageIcon,
   Maximize2,
@@ -43,6 +44,8 @@ import {
   ZoomOut,
 } from "lucide-react";
 import "./App.css";
+import { SequencePlayer, useSequence } from "./SequencePlayer";
+import { frameRect } from "./sequence";
 
 type ThemeMode = "system" | "light" | "dark";
 
@@ -136,9 +139,10 @@ function App() {
   const [rotation, setRotation] = useState(0);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [naturalSize, setNaturalSize] = useState<NaturalSize>({ width: 0, height: 0 });
+  const [sequenceEnabled, setSequenceEnabled] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [updateCenterOpen, setUpdateCenterOpen] = useState(false);
-  const [appVersion, setAppVersion] = useState("0.2.1");
+  const [appVersion, setAppVersion] = useState("0.3.0");
   const [updateEndpoint, setUpdateEndpoint] = useState(
     () => localStorage.getItem("pixelview.updateEndpoint") || defaultUpdateEndpoint,
   );
@@ -150,11 +154,38 @@ function App() {
 
   const viewerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const dragRef = useRef({ pointerId: -1, x: 0, y: 0 });
   const wheelGate = useRef(0);
   const toastTimer = useRef<number | undefined>(undefined);
+  const loadRequest = useRef(0);
 
   const current = currentIndex >= 0 ? items[currentIndex] : undefined;
+  const isGif = current?.name.toLowerCase().endsWith(".gif") ?? false;
+  const sequence = useSequence(naturalSize.width, naturalSize.height, sequenceEnabled);
+  const frameSize = sequenceEnabled && !sequence.layout.error
+    ? { width: sequence.layout.width!, height: sequence.layout.height! }
+    : naturalSize;
+
+  useLayoutEffect(() => {
+    setSequenceEnabled(false);
+    setNaturalSize({ width: 0, height: 0 });
+    sequence.setSettings({ rows: "1", columns: "1", mode: "all", row: "1", start: "1", end: "1" });
+    sequence.setInterval("100");
+    sequence.setLoop(true);
+  }, [current?.id]);
+
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current, image = imageRef.current;
+    if (!sequenceEnabled || !canvas || !image || !image.complete || !image.naturalWidth || sequence.layout.error) return;
+    const rect = frameRect(sequence.frame, sequence.layout.columns!, sequence.layout.width!, sequence.layout.height!);
+    canvas.width = rect.width;
+    canvas.height = rect.height;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.imageSmoothingEnabled = false;
+    context.drawImage(image, rect.x, rect.y, rect.width, rect.height, 0, 0, rect.width, rect.height);
+  }, [sequenceEnabled, sequence.frame, sequence.layout]);
 
   const showToast = useCallback((message: string) => {
     window.clearTimeout(toastTimer.current);
@@ -170,18 +201,20 @@ function App() {
 
   const loadPath = useCallback(
     async (path: string) => {
+      const request = ++loadRequest.current;
       setLoading(true);
       setError("");
       try {
         const snapshot = await invoke<FolderSnapshot>("open_image", { path });
+        if (request !== loadRequest.current) return;
         setItems(snapshot.items);
         setCurrentIndex(snapshot.currentIndex);
         setDirectory(snapshot.directory);
         resetView();
       } catch (reason) {
-        setError(String(reason));
+        if (request === loadRequest.current) setError(String(reason));
       } finally {
-        setLoading(false);
+        if (request === loadRequest.current) setLoading(false);
       }
     },
     [resetView],
@@ -205,6 +238,7 @@ function App() {
     (index: number) => {
       if (index < 0 || index >= items.length || index === currentIndex) return;
       setCurrentIndex(index);
+      setError("");
       setNaturalSize({ width: 0, height: 0 });
       resetView();
     },
@@ -217,7 +251,7 @@ function App() {
   );
 
   const fitImage = useCallback(
-    (size = naturalSize) => {
+    (size = frameSize) => {
       const container = viewerRef.current;
       if (!container || !size.width || !size.height) return;
       const rotated = Math.abs(rotation % 180) === 90;
@@ -232,8 +266,17 @@ function App() {
       setPan({ x: 0, y: 0 });
       setFitMode(true);
     },
-    [naturalSize, rotation],
+    [frameSize.width, frameSize.height, rotation],
   );
+
+  useLayoutEffect(() => {
+    if (fitMode) fitImage();
+  }, [frameSize.width, frameSize.height, fitMode, fitImage]);
+
+  const toggleSequence = () => {
+    setSequenceEnabled(value => !value);
+    resetView();
+  };
 
   const setActualSize = useCallback(() => {
     setZoom(1);
@@ -284,12 +327,13 @@ function App() {
   }, [current, showToast]);
 
   const copyImage = useCallback(async () => {
-    const image = imageRef.current;
+    const image = sequenceEnabled ? canvasRef.current : imageRef.current;
     if (!image || !current) return;
+    if (sequenceEnabled && sequence.layout.error) return;
     try {
       const canvas = document.createElement("canvas");
-      canvas.width = image.naturalWidth;
-      canvas.height = image.naturalHeight;
+      canvas.width = image instanceof HTMLImageElement ? image.naturalWidth : image.width;
+      canvas.height = image instanceof HTMLImageElement ? image.naturalHeight : image.height;
       const context = canvas.getContext("2d");
       if (!context) throw new Error("Canvas unavailable");
       context.imageSmoothingEnabled = false;
@@ -298,11 +342,11 @@ function App() {
         canvas.toBlob((value) => (value ? resolve(value) : reject()), "image/png"),
       );
       await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
-      showToast(current.name.toLowerCase().endsWith(".gif") ? "已复制 GIF 当前帧" : "已复制图片");
+      showToast(sequenceEnabled ? "已复制动画当前帧" : current.name.toLowerCase().endsWith(".gif") ? "已复制 GIF 当前帧" : "已复制图片");
     } catch {
       showToast("无法复制图片");
     }
-  }, [current, showToast]);
+  }, [current, showToast, sequenceEnabled, sequence.layout.error]);
 
   const revealCurrent = useCallback(async () => {
     if (!current) return;
@@ -428,6 +472,17 @@ function App() {
   useEffect(() => {
     let disposed = false;
     let stopListening: (() => void) | undefined;
+    let stopDropListening: (() => void) | undefined;
+    void appWindow.onDragDropEvent(event => {
+      if (event.payload.type === "drop") {
+        const path = event.payload.paths.find(value => /\.(png|jpe?g|webp|bmp|gif)$/i.test(value));
+        if (path) void loadPath(path);
+        else showToast("请拖入支持的图片文件");
+      }
+    }).then(unlisten => {
+      if (disposed) unlisten();
+      else stopDropListening = unlisten;
+    });
     void listen<string>("open-file", (event) => void loadPath(event.payload)).then((unlisten) => {
       if (disposed) unlisten();
       else stopListening = unlisten;
@@ -438,11 +493,27 @@ function App() {
     return () => {
       disposed = true;
       stopListening?.();
+      stopDropListening?.();
     };
-  }, [loadPath]);
+  }, [loadPath, showToast]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (target instanceof HTMLElement && (target.matches("input, select, textarea") || target.isContentEditable)) return;
+      if (updateCenterOpen) return;
+      if (sequenceEnabled && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        if (event.key === " ") {
+          event.preventDefault();
+          sequence.toggle();
+          return;
+        }
+        if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+          event.preventDefault();
+          sequence.seek(sequence.frame + (event.key === "ArrowLeft" ? -1 : 1));
+          return;
+        }
+      }
       if (event.ctrlKey && event.key.toLowerCase() === "o") {
         event.preventDefault();
         void chooseFile();
@@ -475,7 +546,7 @@ function App() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [changeZoom, chooseFile, copyImage, copyPath, fitImage, navigate, rotate, setActualSize, toggleFullscreen]);
+  }, [changeZoom, chooseFile, copyImage, copyPath, fitImage, navigate, rotate, setActualSize, toggleFullscreen, sequenceEnabled, sequence, updateCenterOpen]);
 
   useLayoutEffect(() => {
     const container = viewerRef.current;
@@ -518,6 +589,7 @@ function App() {
           <span className="toolbar-separator" />
           <ToolButton label="上一张 (↑)" onClick={() => navigate(-1)} disabled={currentIndex <= 0}><ChevronUp size={18} /></ToolButton>
           <ToolButton label="下一张 (↓)" onClick={() => navigate(1)} disabled={currentIndex < 0 || currentIndex >= items.length - 1}><ChevronDown size={18} /></ToolButton>
+          <ToolButton label={isGif ? "GIF 自动播放" : "序列动画"} onClick={toggleSequence} disabled={!current || isGif || !naturalSize.width} active={sequenceEnabled}><Film size={18} /></ToolButton>
         </div>
         <div className="toolbar-group toolbar-center">
           <ToolButton label="缩小 (-)" onClick={() => changeZoom(-1)} disabled={!current}><ZoomOut size={18} /></ToolButton>
@@ -543,6 +615,7 @@ function App() {
       </section>
 
       <div className={`workspace${sidebarVisible ? " has-sidebar" : ""}`}>
+        <div className={`viewer-area${sequenceEnabled ? " has-player" : ""}`}>
         <section
           ref={viewerRef}
           className={`viewer${dragging ? " is-dragging" : ""}`}
@@ -567,21 +640,25 @@ function App() {
           onPointerCancel={() => setDragging(false)}
         >
           {current ? (
+            <>
             <img
+              key={current.id}
               ref={imageRef}
               className="main-image"
               src={imageUrl(current.id)}
               alt={current.name}
               crossOrigin="anonymous"
               draggable={false}
-              style={{ transform }}
+              style={{ transform, visibility: sequenceEnabled ? "hidden" : "visible" }}
               onLoad={(event) => {
                 const size = { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight };
                 setNaturalSize(size);
-                if (fitMode) fitImage(size);
+                if (fitMode && !sequenceEnabled) fitImage(size);
               }}
               onError={() => setError("图片无法解码或文件已经移动")}
             />
+            {sequenceEnabled && !sequence.layout.error && <canvas ref={canvasRef} className="main-image" style={{ transform }} aria-label={`${current.name} 第 ${sequence.frame + 1} 帧`} />}
+            </>
           ) : (
             <div className="empty-state">
               <span className="empty-icon"><ImageIcon size={34} strokeWidth={1.6} /></span>
@@ -594,6 +671,8 @@ function App() {
           {error && <button type="button" className="error-banner" onClick={() => setError("")}>{error}<X size={15} /></button>}
           {toast && <div className="toast">{toast}</div>}
         </section>
+        {sequenceEnabled && <SequencePlayer player={sequence} onClose={toggleSequence} />}
+        </div>
 
         {sidebarVisible && (
           <aside className="sidebar">

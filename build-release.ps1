@@ -68,6 +68,9 @@ try {
         Write-Host "正在检查前端代码……" -ForegroundColor Cyan
         Invoke-CheckedCommand npm "run" "build"
 
+        Write-Host "正在运行序列动画测试……" -ForegroundColor Cyan
+        Invoke-CheckedCommand npm "test"
+
         Write-Host "正在运行 Rust 测试……" -ForegroundColor Cyan
         Invoke-CheckedCommand cargo "test" "--manifest-path" "src-tauri\Cargo.toml" "--locked"
 

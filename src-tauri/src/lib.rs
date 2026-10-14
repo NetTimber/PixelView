@@ -390,6 +390,28 @@ mod tests {
     fn reports_expected_mime_types() {
         assert_eq!(mime_type(Path::new("image.jpeg")), "image/jpeg");
         assert_eq!(mime_type(Path::new("image.webp")), "image/webp");
+        assert_eq!(mime_type(Path::new("animation.GIF")), "image/gif");
+    }
+
+    #[test]
+    fn serves_original_gif_bytes_and_static_thumbnails() {
+        for name in ["animated-transparent.gif", "finite-loop.gif", "static.gif"] {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../tests/fixtures")
+                .join(name);
+            let registry = Arc::new(RwLock::new(HashMap::from([(
+                "gif-test".to_string(),
+                RegisteredImage { path: path.clone(), mime_type: "image/gif" },
+            )])));
+            let original = protocol_response(&registry, "/image/gif-test");
+            assert_eq!(original.status(), 200);
+            assert_eq!(original.headers()["Content-Type"], "image/gif");
+            assert_eq!(original.body(), &fs::read(path).unwrap());
+            let thumbnail = protocol_response(&registry, "/thumbnail/gif-test");
+            assert_eq!(thumbnail.status(), 200);
+            assert_eq!(thumbnail.headers()["Content-Type"], "image/png");
+            assert!(image::load_from_memory(thumbnail.body()).is_ok());
+        }
     }
 
     #[test]
